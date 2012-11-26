@@ -1,0 +1,236 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+<head>
+  <meta charset="UTF-8">
+  <title></title>
+  <style type="text/css">
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    button {
+      position: absolute;
+    }
+  </style>
+  <script type="text/javascript" src="js/libs/dat.gui.min.js"></script>
+  <script type="text/javascript" src="js/libs/paper.js"></script>
+  <script type="text/javascript" src="js/libs/rhill-voronoi-core.min.js"></script>
+  <script type="text/javascript" src="js/libs/perlin-noise-simplex.js"></script>
+  <script type="text/javascript">
+  var gui, canvas, size, voronoi, perlin;
+  var map = {
+    width: 500, 
+    height: 500, 
+    seeds: 100, 
+    debug: true
+  };
+
+  generateRandomSeeds = function() {
+    var points = [], seeds = map.seeds;
+    while(seeds--) {
+      var rpoint = paper.Point.random();
+      var point = rpoint.multiply(size);
+      points.push(point);
+    }
+
+    if(map.debug) {
+      for(var p = 0; p < points.length; p++) {
+        var _point = new paper.Path.Circle(points[p], 1);
+        _point.fillColor = 'red';
+      }
+    }
+
+    return points;
+  }
+
+  getArea = function(points) {
+    var area = 0;
+    var j = points.length - 1;
+    var p1; var p2;
+
+    for (var i = 0; i < points.length; j = i++) {
+      p1 = points[i]; p2 = points[j];
+      area += p1.x * p2.y;
+      area -= p1.y * p2.x;
+    }
+    
+    area /= 2;
+    return area;
+  }
+
+  getCentroid = function(points, area) {
+    var x = 0; 
+    var y = 0;
+    var f;
+    var j = points.length -1;
+    var p1; var p2;
+
+    for (var i = 0; i < points.length; j = i++) {
+      p1 = points[i]; p2 = points[j];
+      f= p1.x * p2.y - p2.x * p1.y;
+      x += (p1.x + p2.x) * f;
+      y += (p1.y + p2.y) *f;
+    }
+
+    f = area * 6;
+    var centroid = new paper.Point(x/f, y/f)
+    
+    return centroid;
+  }
+
+  getQuasiRandomSeeds = function(points, diagram) {
+    var centroids = [];
+
+    for (var i = 0, l = points.length; i < l; i++) {
+      var cell = diagram.cells[points[i].voronoiId];
+      if (cell) {
+        var halfedges = cell.halfedges,
+            length = halfedges.length;
+        if (length > 2) {
+          var vertices = [];
+          for (var j = 0; j < length; j++) {
+              v = halfedges[j].getEndpoint();
+              vertices.push(new paper.Point(v));
+          }
+          
+          var area = getArea(vertices);
+          var centroid = getCentroid(vertices, area);
+          centroids.push(centroid);
+        }
+      }
+    }
+
+    return centroids;
+  }
+
+  getVoronoi = function(points) {
+    var boundings = {
+      xl: 0, xr: map.width, yt: 0, yb: map.height
+    };
+
+    voronoi = new Voronoi();
+    var diagram = voronoi.compute(points, boundings);
+    
+    return diagram;
+  }
+
+  drawMap = function(points, diagram) {
+    for (var i = 0, l = points.length; i < l; i++) {
+      var cell = diagram.cells[points[i].voronoiId];
+      if (cell) {
+        var halfedges = cell.halfedges,
+            length = halfedges.length;
+        if (length > 2) {
+          var vertices = [];
+          for (var j = 0; j < length; j++) {
+              v = halfedges[j].getEndpoint();
+              vertices.push(new paper.Point(v));
+          }
+          
+          drawCell(vertices, points[i], cell);
+        }
+      }
+    }
+  }
+
+  drawCell = function(points, center, cell) {
+    var path = new paper.Path();
+
+    path.strokeColor = 'white';
+    path.strokeWidth = 1;
+    var color = cell.type == 'water' ? 'blue': 'green';
+    path.fillColor = color;
+    if(cell.type == 'land')
+      path.fillColor.lightness = cell.height;
+    
+    path.closed = true;
+
+    for (var i = 0, l = points.length; i < l; i++) {
+        var point = points[i];
+        var next = points[(i + 1) == points.length ? 0 : i + 1];
+        var vector = next.subtract(point).divide(2);
+        path.add({
+            point: point.add(vector)
+        });
+        path.add({
+            point: next
+        });
+    }
+
+    if(map.debug) {
+      var _point = new paper.Path.Circle(center, 4);
+      _point.fillColor = 'blue';
+    }
+    
+    return path;
+  }
+
+  fillWithWater = function(diagram, radius) {
+    radiusX = radius || Math.round(map.width*20/100);
+    radiusY = radius || Math.round(map.height*20/100);
+
+    for(var c = 0; c < diagram.cells.length; c ++) {
+      var site = diagram.cells[c].site;
+      var inX = site.x <= radiusX || site.x >= map.width - radiusX;
+      var inY = site.y <= radiusY || site.y >= map.width - radiusY;
+      if(inX || inY) {
+        diagram.cells[c].type = 'water';
+      } else {
+        diagram.cells[c].type = 'land';
+      }
+    }
+  }
+
+  setHeightMap = function(diagram) {
+    for(var c = 0; c < diagram.cells.length; c ++) {
+      var site = diagram.cells[c].site;
+      diagram.cells[c].height = Math.abs(perlin.noise(site.x, site.y));
+    }
+  }
+
+  run = function() {
+    setup();
+
+    console.log('Running...');
+    var seedPoints = generateRandomSeeds();
+    var seedDiagram = getVoronoi(seedPoints);
+    var quasiSeedPoints = getQuasiRandomSeeds(seedPoints, seedDiagram);
+    var diagram = getVoronoi(quasiSeedPoints);
+    fillWithWater(diagram);
+    setHeightMap(diagram);
+    drawMap(quasiSeedPoints, diagram);
+    
+    paper.view.draw();
+  }
+
+  setup = function() {
+    console.log('Setting up...');
+    
+    paper.view.remove();
+    paper.setup(canvas);
+
+    canvas.setAttribute('width', map.width);
+    canvas.setAttribute('height', map.height);
+    size = new paper.Point(map.width, map.height);
+    perlin = new SimplexNoise(Math);
+  }
+
+  window.onload = function() {
+    // Setup Dat GUI
+    gui = new dat.GUI();
+    for(var prop in map) {
+      gui.add(map, prop);
+    }
+
+    // Setup paper.js
+    canvas = document.getElementById('canvas');
+    paper.setup(canvas);
+  }
+  </script>
+</head>
+<body>
+  <button onclick="run();">Draw</button>
+  <canvas id="canvas"></canvas>
+</body>
+</html>
