@@ -1,0 +1,22 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+<head>
+	<meta charset="UTF-8">
+	<title>Island Generator</title>
+	<script type="text/javascript" src="js/libs/rhill-voronoi-core.min.js"></script>
+	<script type="text/javascript" src="js/island.js"></script>
+	<script type="text/javascript">
+	var canvas, island;
+
+	window.onload = function() {
+		canvas = new Canvas('canvas', 500, 500);
+		island = new Island(canvas);
+		island.setSize(500, 500);
+	}
+
+	</script>
+</head>
+<body>
+	<canvas id="canvas"></canvas>
+</body>
+</html>
